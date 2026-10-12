@@ -1,4 +1,3 @@
-
 require("dotenv").config();
 
 const express = require("express");
@@ -11,31 +10,15 @@ const PORT = Number(process.env.PORT || 5000);
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
-// Handle async route errors
+// ============================================
+// HELPERS
+// ============================================
+
 const asyncHandler = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next);
 
-// Validate numeric IDs
 const validId = (id) =>
   Number.isInteger(Number(id)) && Number(id) > 0;
-
-// Validate measurement values
-function parseMeasurement(value, fieldName) {
-  if (value === "" || value === null || value === undefined) {
-    return { valid: true, value: null };
-  }
-
-  const number = Number(value);
-
-  if (!Number.isFinite(number) || number < 0) {
-    return {
-      valid: false,
-      error: `${fieldName} must be a non-negative number.`,
-    };
-  }
-
-  return { valid: true, value: number };
-}
 
 const measurementFields = [
   "chest",
@@ -50,16 +33,92 @@ function readMeasurements(body) {
   const values = {};
 
   for (const field of measurementFields) {
-    const parsed = parseMeasurement(body[field], field);
+    const value = body[field];
 
-    if (!parsed.valid) {
-      return { valid: false, error: parsed.error };
+    if (value === "" || value === null || value === undefined) {
+      values[field] = null;
+      continue;
     }
 
-    values[field] = parsed.value;
+    const number = Number(value);
+
+    if (!Number.isFinite(number) || number < 0) {
+      return {
+        valid: false,
+        error: `${field} must be a non-negative number.`,
+      };
+    }
+
+    values[field] = number;
   }
 
   return { valid: true, values };
+}
+
+const orderStatuses = [
+  "Pending",
+  "In Progress",
+  "Completed",
+  "Cancelled",
+];
+
+function validateOrder(body) {
+  const customerId = Number(body.customer_id);
+  const quantity = Number(body.quantity ?? 1);
+  const totalPrice = Number(body.total_price ?? 0);
+  const garmentType = String(body.garment_type || "").trim();
+  const status = body.status || "Pending";
+
+  if (!validId(body.customer_id)) {
+    return {
+      valid: false,
+      error: "Please select a valid customer.",
+    };
+  }
+
+  if (!garmentType) {
+    return {
+      valid: false,
+      error: "Garment type is required.",
+    };
+  }
+
+  if (!Number.isInteger(quantity) || quantity < 1) {
+    return {
+      valid: false,
+      error: "Quantity must be a positive whole number.",
+    };
+  }
+
+  if (!Number.isFinite(totalPrice) || totalPrice < 0) {
+    return {
+      valid: false,
+      error: "Total price must be a non-negative number.",
+    };
+  }
+
+  if (!orderStatuses.includes(status)) {
+    return {
+      valid: false,
+      error: "Invalid order status.",
+    };
+  }
+
+  return {
+    valid: true,
+    values: {
+      orderCode: String(body.order_code || "").trim() || null,
+      customerId,
+      garmentType,
+      description: body.description || null,
+      quantity,
+      orderDate: body.order_date || null,
+      dueDate: body.due_date || null,
+      status,
+      totalPrice,
+      notes: body.notes || null,
+    },
+  };
 }
 
 // ============================================
@@ -78,12 +137,10 @@ app.get(
 );
 
 // ============================================
-// CUSTOMERS
-// Database columns:
-// id, name, phone, email, address, created_at
+// CUSTOMERS CRUD
 // ============================================
 
-// GET all customers
+// GET ALL CUSTOMERS
 app.get(
   "/api/customers",
   asyncHandler(async (_req, res) => {
@@ -97,7 +154,7 @@ app.get(
   })
 );
 
-// GET one customer
+// GET CUSTOMER BY ID
 app.get(
   "/api/customers/:id",
   asyncHandler(async (req, res) => {
@@ -111,7 +168,7 @@ app.get(
       `SELECT id, name, phone, email, address, created_at
        FROM public.customers
        WHERE id = $1`,
-      [req.params.id]
+      [Number(req.params.id)]
     );
 
     if (result.rowCount === 0) {
@@ -124,7 +181,7 @@ app.get(
   })
 );
 
-// CREATE customer
+// CREATE CUSTOMER
 app.post(
   "/api/customers",
   asyncHandler(async (req, res) => {
@@ -138,7 +195,7 @@ app.post(
 
     const result = await db.query(
       `INSERT INTO public.customers
-         (name, phone, email, address)
+        (name, phone, email, address)
        VALUES ($1, $2, $3, $4)
        RETURNING id, name, phone, email, address, created_at`,
       [
@@ -153,7 +210,7 @@ app.post(
   })
 );
 
-// UPDATE customer
+// UPDATE CUSTOMER
 app.put(
   "/api/customers/:id",
   asyncHandler(async (req, res) => {
@@ -184,7 +241,7 @@ app.put(
         phone || null,
         email || null,
         address || null,
-        req.params.id,
+        Number(req.params.id),
       ]
     );
 
@@ -198,7 +255,7 @@ app.put(
   })
 );
 
-// DELETE customer
+// DELETE CUSTOMER
 app.delete(
   "/api/customers/:id",
   asyncHandler(async (req, res) => {
@@ -213,7 +270,7 @@ app.delete(
         `DELETE FROM public.customers
          WHERE id = $1
          RETURNING id`,
-        [req.params.id]
+        [Number(req.params.id)]
       );
 
       if (result.rowCount === 0) {
@@ -239,13 +296,11 @@ app.delete(
 );
 
 // ============================================
-// MEASUREMENTS
-// Database columns:
-// id, customer_id, chest, waist, hips, shoulder,
-// sleeve, length, notes, created_at
+// MEASUREMENTS CRUD
 // ============================================
 
-// GET all measurements
+// GET ALL MEASUREMENTS
+// Optional filter: /api/measurements?customer_id=1
 app.get(
   "/api/measurements",
   asyncHandler(async (req, res) => {
@@ -288,7 +343,7 @@ app.get(
   })
 );
 
-// GET one measurement
+// GET MEASUREMENT BY ID
 app.get(
   "/api/measurements/:id",
   asyncHandler(async (req, res) => {
@@ -315,7 +370,7 @@ app.get(
        LEFT JOIN public.customers AS c
          ON c.id = m.customer_id
        WHERE m.id = $1`,
-      [req.params.id]
+      [Number(req.params.id)]
     );
 
     if (result.rowCount === 0) {
@@ -328,7 +383,7 @@ app.get(
   })
 );
 
-// CREATE measurement
+// CREATE MEASUREMENT
 app.post(
   "/api/measurements",
   asyncHandler(async (req, res) => {
@@ -363,7 +418,7 @@ app.post(
 
     const result = await db.query(
       `INSERT INTO public.measurements
-         (customer_id, chest, waist, hips, shoulder, sleeve, length, notes)
+        (customer_id, chest, waist, hips, shoulder, sleeve, length, notes)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id, customer_id, chest, waist, hips,
                  shoulder, sleeve, length, notes, created_at`,
@@ -383,7 +438,7 @@ app.post(
   })
 );
 
-// UPDATE measurement
+// UPDATE MEASUREMENT
 app.put(
   "/api/measurements/:id",
   asyncHandler(async (req, res) => {
@@ -444,7 +499,7 @@ app.put(
         v.sleeve,
         v.length,
         notes || null,
-        req.params.id,
+        Number(req.params.id),
       ]
     );
 
@@ -458,7 +513,7 @@ app.put(
   })
 );
 
-// DELETE measurement
+// DELETE MEASUREMENT
 app.delete(
   "/api/measurements/:id",
   asyncHandler(async (req, res) => {
@@ -472,7 +527,7 @@ app.delete(
       `DELETE FROM public.measurements
        WHERE id = $1
        RETURNING id`,
-      [req.params.id]
+      [Number(req.params.id)]
     );
 
     if (result.rowCount === 0) {
@@ -483,6 +538,205 @@ app.delete(
 
     res.json({
       message: "Measurement deleted successfully.",
+    });
+  })
+);
+
+// ============================================
+// DAY 3: TAILORING ORDERS CRUD
+// ============================================
+
+// GET ALL ORDERS
+app.get(
+  "/api/orders",
+  asyncHandler(async (_req, res) => {
+    const result = await db.query(`
+      SELECT o.*, c.name AS customer_name
+      FROM public.orders AS o
+      JOIN public.customers AS c
+        ON c.id = o.customer_id
+      ORDER BY o.id DESC
+    `);
+
+    res.json(result.rows);
+  })
+);
+
+// GET ORDER BY ID
+app.get(
+  "/api/orders/:id",
+  asyncHandler(async (req, res) => {
+    if (!validId(req.params.id)) {
+      return res.status(400).json({
+        error: "Invalid order ID.",
+      });
+    }
+
+    const result = await db.query(
+      `SELECT o.*, c.name AS customer_name
+       FROM public.orders AS o
+       JOIN public.customers AS c
+         ON c.id = o.customer_id
+       WHERE o.id = $1`,
+      [Number(req.params.id)]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        error: "Order not found.",
+      });
+    }
+
+    res.json(result.rows[0]);
+  })
+);
+
+// CREATE ORDER
+app.post(
+  "/api/orders",
+  asyncHandler(async (req, res) => {
+    const parsed = validateOrder(req.body);
+
+    if (!parsed.valid) {
+      return res.status(400).json({
+        error: parsed.error,
+      });
+    }
+
+    const v = parsed.values;
+
+    const customer = await db.query(
+      "SELECT id FROM public.customers WHERE id = $1",
+      [v.customerId]
+    );
+
+    if (customer.rowCount === 0) {
+      return res.status(400).json({
+        error: "The selected customer does not exist.",
+      });
+    }
+
+    const result = await db.query(
+      `INSERT INTO public.orders
+        (order_code, customer_id, garment_type, description,
+         quantity, order_date, due_date, status, total_price, notes)
+       VALUES
+        ($1, $2, $3, $4, $5,
+         COALESCE($6::date, CURRENT_DATE), $7, $8, $9, $10)
+       RETURNING *`,
+      [
+        v.orderCode,
+        v.customerId,
+        v.garmentType,
+        v.description,
+        v.quantity,
+        v.orderDate,
+        v.dueDate,
+        v.status,
+        v.totalPrice,
+        v.notes,
+      ]
+    );
+
+    res.status(201).json(result.rows[0]);
+  })
+);
+
+// UPDATE ORDER
+app.put(
+  "/api/orders/:id",
+  asyncHandler(async (req, res) => {
+    if (!validId(req.params.id)) {
+      return res.status(400).json({
+        error: "Invalid order ID.",
+      });
+    }
+
+    const parsed = validateOrder(req.body);
+
+    if (!parsed.valid) {
+      return res.status(400).json({
+        error: parsed.error,
+      });
+    }
+
+    const v = parsed.values;
+
+    const customer = await db.query(
+      "SELECT id FROM public.customers WHERE id = $1",
+      [v.customerId]
+    );
+
+    if (customer.rowCount === 0) {
+      return res.status(400).json({
+        error: "The selected customer does not exist.",
+      });
+    }
+
+    const result = await db.query(
+      `UPDATE public.orders
+       SET order_code = $1,
+           customer_id = $2,
+           garment_type = $3,
+           description = $4,
+           quantity = $5,
+           order_date = COALESCE($6::date, CURRENT_DATE),
+           due_date = $7,
+           status = $8,
+           total_price = $9,
+           notes = $10
+       WHERE id = $11
+       RETURNING *`,
+      [
+        v.orderCode,
+        v.customerId,
+        v.garmentType,
+        v.description,
+        v.quantity,
+        v.orderDate,
+        v.dueDate,
+        v.status,
+        v.totalPrice,
+        v.notes,
+        Number(req.params.id),
+      ]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        error: "Order not found.",
+      });
+    }
+
+    res.json(result.rows[0]);
+  })
+);
+
+// DELETE ORDER
+app.delete(
+  "/api/orders/:id",
+  asyncHandler(async (req, res) => {
+    if (!validId(req.params.id)) {
+      return res.status(400).json({
+        error: "Invalid order ID.",
+      });
+    }
+
+    const result = await db.query(
+      `DELETE FROM public.orders
+       WHERE id = $1
+       RETURNING id`,
+      [Number(req.params.id)]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        error: "Order not found.",
+      });
+    }
+
+    res.json({
+      message: "Order deleted successfully.",
     });
   })
 );
@@ -504,21 +758,22 @@ app.use((req, res) => {
 app.use((error, _req, res, _next) => {
   console.error("API request failed:", error);
 
-  if (res.headersSent) {
-    return;
-  }
+  if (res.headersSent) return;
 
   if (error.code === "23503") {
     return res.status(400).json({
-      error: "The selected related record does not exist or is still in use.",
+      error:
+        "The selected related record does not exist or is still in use.",
     });
   }
 
-  if (
-    error.code === "22P02" ||
-    error.code === "22007" ||
-    error.code === "23514"
-  ) {
+  if (error.code === "23505") {
+    return res.status(409).json({
+      error: "A record with that unique value already exists.",
+    });
+  }
+
+  if (["22P02", "22007", "23514"].includes(error.code)) {
     return res.status(400).json({
       error: "One or more values are invalid.",
     });

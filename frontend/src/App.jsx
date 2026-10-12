@@ -3,35 +3,106 @@ import React, { useEffect, useState } from "react";
 import axios from "axios";
 import "./App.css";
 
-
 const api = axios.create({
   baseURL: "http://localhost:5000/api",
 });
 
+const measurementFields = [
+  "chest",
+  "waist",
+  "hips",
+  "shoulder",
+  "sleeve",
+  "length",
+];
+
+const emptyCustomer = {
+  name: "",
+  phone: "",
+  email: "",
+  address: "",
+};
+
+const emptyMeasurement = {
+  customer_id: "",
+  chest: "",
+  waist: "",
+  hips: "",
+  shoulder: "",
+  sleeve: "",
+  length: "",
+  notes: "",
+};
+
+const emptyOrder = {
+  order_code: "",
+  customer_id: "",
+  garment_type: "",
+  description: "",
+  quantity: 1,
+  order_date: new Date().toISOString().slice(0, 10),
+  due_date: "",
+  status: "Pending",
+  total_price: "",
+  notes: "",
+};
+
+function getList(data, key) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.[key])) return data[key];
+  if (Array.isArray(data?.data)) return data.data;
+  return [];
+}
+
+function getErrorMessage(error, fallback) {
+  return (
+    error.response?.data?.message ||
+    error.response?.data?.error ||
+    error.message ||
+    fallback
+  );
+}
+
+function formatCurrency(value) {
+  return new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+  }).format(Number(value) || 0);
+}
+
+function formatLabel(value) {
+  return value
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 export default function App() {
   const [page, setPage] = useState("customers");
+
   const [customers, setCustomers] = useState([]);
   const [measurements, setMeasurements] = useState([]);
+  const [orders, setOrders] = useState([]);
+
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [editingId, setEditingId] = useState(null);
+  const [success, setSuccess] = useState("");
+
+  const [editingCustomerId, setEditingCustomerId] = useState(null);
+  const [editingMeasurementId, setEditingMeasurementId] =
+    useState(null);
+  const [editingOrderId, setEditingOrderId] = useState(null);
 
   const [customerForm, setCustomerForm] = useState({
-    name: "",
-    phone: "",
-    email: "",
-    address: "",
+    ...emptyCustomer,
   });
 
   const [measurementForm, setMeasurementForm] = useState({
-    customer_id: "",
-    chest: "",
-    waist: "",
-    hips: "",
-    shoulder: "",
-    sleeve: "",
-    length: "",
-    notes: "",
+    ...emptyMeasurement,
+  });
+
+  const [orderForm, setOrderForm] = useState({
+    ...emptyOrder,
   });
 
   async function loadData() {
@@ -39,29 +110,24 @@ export default function App() {
     setError("");
 
     try {
-      const [customerResponse, measurementResponse] = await Promise.all([
-        api.get("/customers"),
-        api.get("/measurements"),
-      ]);
+      const [customerResponse, measurementResponse, orderResponse] =
+        await Promise.all([
+          api.get("/customers"),
+          api.get("/measurements"),
+          api.get("/orders"),
+        ]);
 
-      const customerData = customerResponse.data;
-      const measurementData = measurementResponse.data;
-
-      setCustomers(
-        Array.isArray(customerData)
-          ? customerData
-          : customerData.customers || customerData.data || []
-      );
-
+      setCustomers(getList(customerResponse.data, "customers"));
       setMeasurements(
-        Array.isArray(measurementData)
-          ? measurementData
-          : measurementData.measurements || measurementData.data || []
+        getList(measurementResponse.data, "measurements")
       );
+      setOrders(getList(orderResponse.data, "orders"));
     } catch (err) {
       setError(
-        err.response?.data?.message ||
-          "Cannot load data. Check that the backend and PostgreSQL are running."
+        getErrorMessage(
+          err,
+          "Cannot load data. Check the backend, database, and API routes."
+        )
       );
     } finally {
       setLoading(false);
@@ -72,47 +138,77 @@ export default function App() {
     loadData();
   }, []);
 
+  function showSuccess(message) {
+    setSuccess(message);
+    setError("");
+  }
+
   function resetCustomerForm() {
-    setCustomerForm({
-      name: "",
-      phone: "",
-      email: "",
-      address: "",
-    });
-    setEditingId(null);
+    setCustomerForm({ ...emptyCustomer });
+    setEditingCustomerId(null);
   }
 
   function resetMeasurementForm() {
-    setMeasurementForm({
-      customer_id: "",
-      chest: "",
-      waist: "",
-      hips: "",
-      shoulder: "",
-      sleeve: "",
-      length: "",
-      notes: "",
+    setMeasurementForm({ ...emptyMeasurement });
+    setEditingMeasurementId(null);
+  }
+
+  function resetOrderForm() {
+    setOrderForm({
+      ...emptyOrder,
+      order_date: new Date().toISOString().slice(0, 10),
     });
-    setEditingId(null);
+    setEditingOrderId(null);
+  }
+
+  function updateCustomerField(event) {
+    const { name, value } = event.target;
+    setCustomerForm((previous) => ({
+      ...previous,
+      [name]: value,
+    }));
+  }
+
+  function updateMeasurementField(event) {
+    const { name, value } = event.target;
+    setMeasurementForm((previous) => ({
+      ...previous,
+      [name]: value,
+    }));
+  }
+
+  function updateOrderField(event) {
+    const { name, value } = event.target;
+    setOrderForm((previous) => ({
+      ...previous,
+      [name]: value,
+    }));
   }
 
   async function saveCustomer(event) {
     event.preventDefault();
+    setSaving(true);
     setError("");
+    setSuccess("");
 
     try {
-      if (editingId !== null) {
-        await api.put(`/customers/${editingId}`, customerForm);
+      if (editingCustomerId !== null) {
+        await api.put(
+          `/customers/${editingCustomerId}`,
+          customerForm
+        );
+        showSuccess("Customer updated successfully.");
       } else {
         await api.post("/customers", customerForm);
+        showSuccess("Customer added successfully.");
       }
 
       resetCustomerForm();
       await loadData();
     } catch (err) {
-      setError(
-        err.response?.data?.message || "Unable to save customer."
-      );
+      setError(getErrorMessage(err, "Unable to save customer."));
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -123,252 +219,383 @@ export default function App() {
       email: customer.email || "",
       address: customer.address || "",
     });
-    setEditingId(customer.id);
+    setEditingCustomerId(customer.id);
     setPage("customers");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function deleteCustomer(id) {
-    if (!window.confirm("Delete this customer?")) return;
+  async function deleteCustomer(customer) {
+    const confirmed = window.confirm(
+      `Delete customer "${customer.name}"?`
+    );
+    if (!confirmed) return;
+
+    setError("");
+    setSuccess("");
 
     try {
-      await api.delete(`/customers/${id}`);
+      await api.delete(`/customers/${customer.id}`);
+      showSuccess("Customer deleted successfully.");
       await loadData();
     } catch (err) {
       setError(
-        err.response?.data?.message || "Unable to delete customer."
+        getErrorMessage(
+          err,
+          "Unable to delete customer. Check whether the customer has measurements or orders."
+        )
       );
     }
   }
 
   async function saveMeasurement(event) {
     event.preventDefault();
+    setSaving(true);
     setError("");
-
-    const payload = Object.fromEntries(
-      Object.entries(measurementForm).map(([key, value]) => [
-        key,
-        value === "" ? null : value,
-      ])
-    );
+    setSuccess("");
 
     try {
-      if (editingId !== null) {
-        await api.put(`/measurements/${editingId}`, payload);
+      const payload = {
+        customer_id: Number(measurementForm.customer_id),
+        chest: measurementForm.chest || null,
+        waist: measurementForm.waist || null,
+        hips: measurementForm.hips || null,
+        shoulder: measurementForm.shoulder || null,
+        sleeve: measurementForm.sleeve || null,
+        length: measurementForm.length || null,
+        notes: measurementForm.notes.trim(),
+      };
+
+      if (editingMeasurementId !== null) {
+        await api.put(
+          `/measurements/${editingMeasurementId}`,
+          payload
+        );
+        showSuccess("Measurement updated successfully.");
       } else {
         await api.post("/measurements", payload);
+        showSuccess("Measurement added successfully.");
       }
 
       resetMeasurementForm();
       await loadData();
     } catch (err) {
       setError(
-        err.response?.data?.message || "Unable to save measurement."
+        getErrorMessage(err, "Unable to save measurement.")
       );
+    } finally {
+      setSaving(false);
     }
   }
 
-  function editMeasurement(item) {
+  function editMeasurement(measurement) {
     setMeasurementForm({
-      customer_id: String(item.customer_id || ""),
-      chest: item.chest ?? "",
-      waist: item.waist ?? "",
-      hips: item.hips ?? "",
-      shoulder: item.shoulder ?? "",
-      sleeve: item.sleeve ?? "",
-      length: item.length ?? "",
-      notes: item.notes || "",
+      customer_id: String(measurement.customer_id || ""),
+      chest: measurement.chest ?? "",
+      waist: measurement.waist ?? "",
+      hips: measurement.hips ?? "",
+      shoulder: measurement.shoulder ?? "",
+      sleeve: measurement.sleeve ?? "",
+      length: measurement.length ?? "",
+      notes: measurement.notes || "",
     });
-    setEditingId(item.id);
+    setEditingMeasurementId(measurement.id);
     setPage("measurements");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function deleteMeasurement(id) {
-    if (!window.confirm("Delete this measurement?")) return;
+  async function deleteMeasurement(measurement) {
+    const confirmed = window.confirm(
+      "Delete this measurement record?"
+    );
+    if (!confirmed) return;
+
+    setError("");
+    setSuccess("");
 
     try {
-      await api.delete(`/measurements/${id}`);
+      await api.delete(`/measurements/${measurement.id}`);
+      showSuccess("Measurement deleted successfully.");
       await loadData();
     } catch (err) {
       setError(
-        err.response?.data?.message || "Unable to delete measurement."
+        getErrorMessage(err, "Unable to delete measurement.")
       );
     }
   }
 
+  async function saveOrder(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const payload = {
+        order_code: orderForm.order_code.trim() || null,
+        customer_id: Number(orderForm.customer_id),
+        garment_type: orderForm.garment_type.trim(),
+        description: orderForm.description.trim(),
+        quantity: Number(orderForm.quantity),
+        order_date: orderForm.order_date,
+        due_date: orderForm.due_date || null,
+        status: orderForm.status,
+        total_price: Number(orderForm.total_price),
+        notes: orderForm.notes.trim(),
+      };
+
+      if (editingOrderId !== null) {
+        await api.put(`/orders/${editingOrderId}`, payload);
+        showSuccess("Order updated successfully.");
+      } else {
+        await api.post("/orders", payload);
+        showSuccess("Order added successfully.");
+      }
+
+      resetOrderForm();
+      await loadData();
+    } catch (err) {
+      setError(getErrorMessage(err, "Unable to save order."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function editOrder(order) {
+    setOrderForm({
+      order_code: order.order_code || "",
+      customer_id: String(order.customer_id || ""),
+      garment_type: order.garment_type || "",
+      description: order.description || "",
+      quantity: order.quantity ?? 1,
+      order_date: order.order_date
+        ? String(order.order_date).slice(0, 10)
+        : new Date().toISOString().slice(0, 10),
+      due_date: order.due_date
+        ? String(order.due_date).slice(0, 10)
+        : "",
+      status: order.status || "Pending",
+      total_price: order.total_price ?? "",
+      notes: order.notes || "",
+    });
+
+    setEditingOrderId(order.id);
+    setPage("orders");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function deleteOrder(order) {
+    const confirmed = window.confirm(
+      `Delete order "${order.order_code || order.id}"?`
+    );
+    if (!confirmed) return;
+
+    setError("");
+    setSuccess("");
+
+    try {
+      await api.delete(`/orders/${order.id}`);
+      showSuccess("Order deleted successfully.");
+      await loadData();
+    } catch (err) {
+      setError(getErrorMessage(err, "Unable to delete order."));
+    }
+  }
+
+  function customerName(customerId) {
+    const customer = customers.find(
+      (item) => Number(item.id) === Number(customerId)
+    );
+    return customer?.name || "Unknown Customer";
+  }
+
+  function customerOptionLabel(customer) {
+    return `${customer.name}${customer.phone ? ` — ${customer.phone}` : ""}`;
+  }
+
   return (
-    <div className="app">
+    <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-icon">S</div>
+          <div className="brand-logo">S</div>
           <div>
-            <h2>StitchFlow</h2>
+            <h1>StitchFlow</h1>
             <p>Tailoring Management</p>
           </div>
         </div>
 
-        <p className="menu-label">WORKSPACE</p>
+        <div className="sidebar-label">WORKSPACE</div>
 
-        <button
-          className={`nav-item ${page === "customers" ? "active" : ""}`}
-          onClick={() => setPage("customers")}
-        >
-          <span>♙</span> Customers
-        </button>
+        <nav className="sidebar-nav">
+          <button
+            type="button"
+            className={`nav-item ${page === "customers" ? "active" : ""}`}
+            onClick={() => {
+              setPage("customers");
+              setError("");
+              setSuccess("");
+            }}
+          >
+            <span>♙</span> Customers
+          </button>
 
-        <button
-          className={`nav-item ${page === "measurements" ? "active" : ""}`}
-          onClick={() => setPage("measurements")}
-        >
-          <span>♧</span> Measurements
-        </button>
+          <button
+            type="button"
+            className={`nav-item ${page === "measurements" ? "active" : ""}`}
+            onClick={() => {
+              setPage("measurements");
+              setError("");
+              setSuccess("");
+            }}
+          >
+            <span>♧</span> Measurements
+          </button>
 
-        <div className="sidebar-bottom">
-          <p>StitchFlow System</p>
-          <small>Tailoring made organized.</small>
+          <button
+            type="button"
+            className={`nav-item ${page === "orders" ? "active" : ""}`}
+            onClick={() => {
+              setPage("orders");
+              setError("");
+              setSuccess("");
+            }}
+          >
+            <span>✂</span> Orders
+          </button>
+        </nav>
+
+        <div className="sidebar-footer">
+          <strong>StitchFlow System</strong>
+          <p>Tailoring made organized.</p>
         </div>
       </aside>
 
       <main className="main-content">
-        <header className="topbar">
+        <header className="page-header">
           <div>
-            <p className="eyebrow">TAILORING SHOP</p>
-            <h1>
-              {page === "customers" ? "Customer Management" : "Measurements"}
-            </h1>
-          </div>
-          <div className="profile">
-            <div className="avatar">S</div>
-            <div>
-              <strong>Shop Admin</strong>
-              <small>Administrator</small>
-            </div>
-          </div>
-        </header>
-
-        <section className="welcome">
-          <div>
-            <p className="eyebrow">YOUR WORKSPACE</p>
+            <p className="eyebrow">TAILORING MANAGEMENT SYSTEM</p>
             <h2>
               {page === "customers"
-                ? "Manage your customers"
-                : "Customer measurements"}
+                ? "Customers"
+                : page === "measurements"
+                  ? "Measurements"
+                  : "Orders"}
             </h2>
-            <p>
-              {page === "customers"
-                ? "Keep customer information organized in one place."
-                : "Record and manage measurements for custom-made clothing."}
-            </p>
+            <p>Manage your tailoring shop records in one place.</p>
           </div>
-          <div className="welcome-icon">✂</div>
-        </section>
 
-        <section className="stats-grid">
-          <article className="stat-card">
-            <div className="stat-icon purple">♙</div>
-            <p>Total Customers</p>
-            <h2>{customers.length}</h2>
-          </article>
-
-          <article className="stat-card">
-            <div className="stat-icon green">♧</div>
-            <p>Total Measurements</p>
-            <h2>{measurements.length}</h2>
-          </article>
-
-          <article className="stat-card">
-            <div className="stat-icon orange">✂</div>
-            <p>Shop Workspace</p>
-            <h2>Active</h2>
-          </article>
-        </section>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={loadData}
+            disabled={loading}
+          >
+            {loading ? "Refreshing..." : "Refresh Data"}
+          </button>
+        </header>
 
         {error && (
-          <div className="error-message">
-            <span>{error}</span>
-            <button onClick={() => setError("")}>×</button>
+          <div className="error-message" role="alert">
+            {error}
           </div>
         )}
+
+        {success && (
+          <div className="success-message" role="status">
+            {success}
+          </div>
+        )}
+
+        <section className="stats-grid">
+          <div className="stat-card">
+            <p>Total Customers</p>
+            <h3>{customers.length}</h3>
+          </div>
+
+          <div className="stat-card">
+            <p>Total Measurements</p>
+            <h3>{measurements.length}</h3>
+          </div>
+
+          <div className="stat-card">
+            <p>Total Orders</p>
+            <h3>{orders.length}</h3>
+          </div>
+        </section>
 
         {page === "customers" && (
           <>
             <section className="panel">
               <div className="panel-heading">
-                <div>
-                  <h2>{editingId !== null ? "Edit Customer" : "Add Customer"}</h2>
-                  <p>Enter the customer's contact information.</p>
-                </div>
+                <h3>
+                  {editingCustomerId !== null
+                    ? "Edit Customer"
+                    : "Add Customer"}
+                </h3>
+                <p>Enter the customer's contact information.</p>
               </div>
 
-              <form className="form-grid" onSubmit={saveCustomer}>
-                <label>
-                  Full Name *
-                  <input
-                    required
-                    value={customerForm.name}
-                    onChange={(e) =>
-                      setCustomerForm({
-                        ...customerForm,
-                        name: e.target.value,
-                      })
-                    }
-                    placeholder="Enter full name"
-                  />
-                </label>
+              <form onSubmit={saveCustomer}>
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label htmlFor="customer-name">Full Name *</label>
+                    <input
+                      id="customer-name"
+                      name="name"
+                      value={customerForm.name}
+                      onChange={updateCustomerField}
+                      placeholder="Enter full name"
+                      required
+                    />
+                  </div>
 
-                <label>
-                  Phone Number
-                  <input
-                    value={customerForm.phone}
-                    onChange={(e) =>
-                      setCustomerForm({
-                        ...customerForm,
-                        phone: e.target.value,
-                      })
-                    }
-                    placeholder="09XX XXX XXXX"
-                  />
-                </label>
+                  <div className="form-group">
+                    <label htmlFor="customer-phone">Phone Number</label>
+                    <input
+                      id="customer-phone"
+                      name="phone"
+                      value={customerForm.phone}
+                      onChange={updateCustomerField}
+                      placeholder="09XX XXX XXXX"
+                    />
+                  </div>
 
-                <label>
-                  Email Address
-                  <input
-                    type="email"
-                    value={customerForm.email}
-                    onChange={(e) =>
-                      setCustomerForm({
-                        ...customerForm,
-                        email: e.target.value,
-                      })
-                    }
-                    placeholder="customer@email.com"
-                  />
-                </label>
+                  <div className="form-group">
+                    <label htmlFor="customer-email">Email Address</label>
+                    <input
+                      id="customer-email"
+                      name="email"
+                      type="email"
+                      value={customerForm.email}
+                      onChange={updateCustomerField}
+                      placeholder="customer@email.com"
+                    />
+                  </div>
 
-                <label>
-                  Address
-                  <input
-                    value={customerForm.address}
-                    onChange={(e) =>
-                      setCustomerForm({
-                        ...customerForm,
-                        address: e.target.value,
-                      })
-                    }
-                    placeholder="Enter address"
-                  />
-                </label>
+                  <div className="form-group">
+                    <label htmlFor="customer-address">Address</label>
+                    <input
+                      id="customer-address"
+                      name="address"
+                      value={customerForm.address}
+                      onChange={updateCustomerField}
+                      placeholder="Enter address"
+                    />
+                  </div>
+                </div>
 
                 <div className="form-actions">
-                  <button type="submit" className="primary-button">
-                    {editingId !== null ? "Update Customer" : "+ Add Customer"}
+                  <button className="btn btn-primary" disabled={saving}>
+                    {saving
+                      ? "Saving..."
+                      : editingCustomerId !== null
+                        ? "Update Customer"
+                        : "+ Add Customer"}
                   </button>
 
-                  {editingId !== null && (
+                  {editingCustomerId !== null && (
                     <button
                       type="button"
-                      className="secondary-button"
+                      className="btn btn-secondary"
                       onClick={resetCustomerForm}
                     >
                       Cancel
@@ -379,64 +606,70 @@ export default function App() {
             </section>
 
             <section className="panel">
-              <div className="panel-heading">
+              <div className="list-heading">
                 <div>
-                  <h2>Customer List</h2>
+                  <h3>Customer List</h3>
                   <p>{customers.length} customer record(s)</p>
                 </div>
-                <button className="secondary-button" onClick={loadData}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={loadData}
+                  disabled={loading}
+                >
                   Refresh
                 </button>
               </div>
 
-              {loading ? (
-                <p className="empty-state">Loading customers...</p>
-              ) : (
-                <div className="table-wrapper">
-                  <table>
-                    <thead>
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Customer</th>
+                      <th>Phone</th>
+                      <th>Email</th>
+                      <th>Address</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customers.length === 0 ? (
                       <tr>
-                        <th>Customer</th>
-                        <th>Phone</th>
-                        <th>Email</th>
-                        <th>Address</th>
-                        <th>Actions</th>
+                        <td colSpan="5" className="empty-state">
+                          No customers found. Add your first customer above.
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {customers.map((customer) => (
+                    ) : (
+                      customers.map((customer) => (
                         <tr key={customer.id}>
-                          <td><strong>{customer.name}</strong></td>
+                          <td>{customer.name}</td>
                           <td>{customer.phone || "—"}</td>
                           <td>{customer.email || "—"}</td>
                           <td>{customer.address || "—"}</td>
-                          <td className="actions">
-                            <button
-                              className="edit-button"
-                              onClick={() => editCustomer(customer)}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              className="delete-button"
-                              onClick={() => deleteCustomer(customer.id)}
-                            >
-                              Delete
-                            </button>
+                          <td>
+                            <div className="table-actions">
+                              <button
+                                type="button"
+                                className="btn btn-edit"
+                                onClick={() => editCustomer(customer)}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-delete"
+                                onClick={() => deleteCustomer(customer)}
+                              >
+                                Delete
+                              </button>
+                            </div>
                           </td>
                         </tr>
-                      ))}
-                      {customers.length === 0 && (
-                        <tr>
-                          <td colSpan="5" className="empty-state">
-                            No customers yet. Add your first customer above.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </section>
           </>
         )}
@@ -445,166 +678,438 @@ export default function App() {
           <>
             <section className="panel">
               <div className="panel-heading">
-                <div>
-                  <h2>
-                    {editingId !== null
-                      ? "Edit Measurement"
-                      : "Add Measurement"}
-                  </h2>
-                  <p>Record the customer's body measurements.</p>
-                </div>
+                <h3>
+                  {editingMeasurementId !== null
+                    ? "Edit Measurement"
+                    : "Add Measurement"}
+                </h3>
+                <p>Record the customer's body measurements.</p>
               </div>
 
-              <form className="form-grid" onSubmit={saveMeasurement}>
-                <label>
-                  Customer *
-                  <select
-                    required
-                    value={measurementForm.customer_id}
-                    onChange={(e) =>
-                      setMeasurementForm({
-                        ...measurementForm,
-                        customer_id: e.target.value,
-                      })
-                    }
-                  >
-                    <option value="">Select customer</option>
-                    {customers.map((customer) => (
-                      <option key={customer.id} value={customer.id}>
-                        {customer.name}
-                      </option>
+              {customers.length === 0 ? (
+                <p className="empty-state">
+                  Add a customer first before recording measurements.
+                </p>
+              ) : (
+                <form onSubmit={saveMeasurement}>
+                  <div className="form-grid">
+                    <div className="form-group">
+                      <label htmlFor="measurement-customer">
+                        Customer *
+                      </label>
+                      <select
+                        id="measurement-customer"
+                        name="customer_id"
+                        value={measurementForm.customer_id}
+                        onChange={updateMeasurementField}
+                        required
+                      >
+                        <option value="">Select a customer</option>
+                        {customers.map((customer) => (
+                          <option key={customer.id} value={customer.id}>
+                            {customerOptionLabel(customer)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {measurementFields.map((field) => (
+                      <div className="form-group" key={field}>
+                        <label htmlFor={`measurement-${field}`}>
+                          {formatLabel(field)} (cm)
+                        </label>
+                        <input
+                          id={`measurement-${field}`}
+                          name={field}
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={measurementForm[field]}
+                          onChange={updateMeasurementField}
+                          placeholder={`Enter ${field}`}
+                        />
+                      </div>
                     ))}
-                  </select>
-                </label>
 
-                {["chest", "waist", "hips", "shoulder", "sleeve", "length"].map(
-                  (field) => (
-                    <label key={field}>
-                      {field.charAt(0).toUpperCase() + field.slice(1)} (cm)
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.1"
-                        value={measurementForm[field]}
-                        onChange={(e) =>
-                          setMeasurementForm({
-                            ...measurementForm,
-                            [field]: e.target.value,
-                          })
-                        }
-                        placeholder="Enter measurement"
+                    <div className="form-group form-group-full">
+                      <label htmlFor="measurement-notes">Notes</label>
+                      <textarea
+                        id="measurement-notes"
+                        name="notes"
+                        value={measurementForm.notes}
+                        onChange={updateMeasurementField}
+                        placeholder="Additional measurement notes"
+                        rows="3"
                       />
-                    </label>
-                  )
-                )}
+                    </div>
+                  </div>
 
-                <label className="full-width">
-                  Notes
-                  <textarea
-                    rows="3"
-                    value={measurementForm.notes}
-                    onChange={(e) =>
-                      setMeasurementForm({
-                        ...measurementForm,
-                        notes: e.target.value,
-                      })
-                    }
-                    placeholder="Additional fitting notes"
-                  />
-                </label>
-
-                <div className="form-actions">
-                  <button type="submit" className="primary-button">
-                    {editingId !== null
-                      ? "Update Measurement"
-                      : "+ Add Measurement"}
-                  </button>
-                  {editingId !== null && (
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      onClick={resetMeasurementForm}
-                    >
-                      Cancel
+                  <div className="form-actions">
+                    <button className="btn btn-primary" disabled={saving}>
+                      {saving
+                        ? "Saving..."
+                        : editingMeasurementId !== null
+                          ? "Update Measurement"
+                          : "+ Add Measurement"}
                     </button>
-                  )}
-                </div>
-              </form>
+
+                    {editingMeasurementId !== null && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={resetMeasurementForm}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </form>
+              )}
             </section>
 
             <section className="panel">
-              <div className="panel-heading">
+              <div className="list-heading">
                 <div>
-                  <h2>Measurement Records</h2>
-                  <p>{measurements.length} record(s)</p>
+                  <h3>Measurement List</h3>
+                  <p>{measurements.length} measurement record(s)</p>
                 </div>
-                <button className="secondary-button" onClick={loadData}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={loadData}
+                  disabled={loading}
+                >
                   Refresh
                 </button>
               </div>
 
-              {loading ? (
-                <p className="empty-state">Loading measurements...</p>
-              ) : (
-                <div className="table-wrapper">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Customer</th>
-                        <th>Chest</th>
-                        <th>Waist</th>
-                        <th>Hips</th>
-                        <th>Shoulder</th>
-                        <th>Sleeve</th>
-                        <th>Length</th>
-                        <th>Notes</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {measurements.map((item) => (
-                        <tr key={item.id}>
-                          <td>
-                            {item.customer_name ||
-                              customers.find(
-                                (c) => String(c.id) === String(item.customer_id)
-                              )?.name ||
-                              `Customer #${item.customer_id}`}
-                          </td>
-                          <td>{item.chest ?? "—"}</td>
-                          <td>{item.waist ?? "—"}</td>
-                          <td>{item.hips ?? "—"}</td>
-                          <td>{item.shoulder ?? "—"}</td>
-                          <td>{item.sleeve ?? "—"}</td>
-                          <td>{item.length ?? "—"}</td>
-                          <td>{item.notes || "—"}</td>
-                          <td className="actions">
-                            <button
-                              className="edit-button"
-                              onClick={() => editMeasurement(item)}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              className="delete-button"
-                              onClick={() => deleteMeasurement(item.id)}
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Customer</th>
+                      {measurementFields.map((field) => (
+                        <th key={field}>{formatLabel(field)} (cm)</th>
                       ))}
-                      {measurements.length === 0 && (
-                        <tr>
-                          <td colSpan="9" className="empty-state">
-                            No measurements yet. Add a record above.
+                      <th>Notes</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {measurements.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={measurementFields.length + 3}
+                          className="empty-state"
+                        >
+                          No measurements recorded yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      measurements.map((measurement) => (
+                        <tr key={measurement.id}>
+                          <td>
+                            {measurement.customer_name ||
+                              customerName(measurement.customer_id)}
+                          </td>
+                          {measurementFields.map((field) => (
+                            <td key={field}>
+                              {measurement[field] ?? "—"}
+                            </td>
+                          ))}
+                          <td>{measurement.notes || "—"}</td>
+                          <td>
+                            <div className="table-actions">
+                              <button
+                                type="button"
+                                className="btn btn-edit"
+                                onClick={() => editMeasurement(measurement)}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-delete"
+                                onClick={() =>
+                                  deleteMeasurement(measurement)
+                                }
+                              >
+                                Delete
+                              </button>
+                            </div>
                           </td>
                         </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        )}
+
+        {page === "orders" && (
+          <>
+            <section className="panel">
+              <div className="panel-heading">
+                <h3>
+                  {editingOrderId !== null ? "Edit Order" : "Add Order"}
+                </h3>
+                <p>Enter the details of the customer's tailoring order.</p>
+              </div>
+
+              {customers.length === 0 ? (
+                <p className="empty-state">
+                  Add a customer first before creating an order.
+                </p>
+              ) : (
+                <form onSubmit={saveOrder}>
+                  <div className="form-grid">
+                    <div className="form-group">
+                      <label htmlFor="order-code">Order Code</label>
+                      <input
+                        id="order-code"
+                        name="order_code"
+                        value={orderForm.order_code}
+                        onChange={updateOrderField}
+                        placeholder="ORD-2026-001"
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="order-customer">Customer *</label>
+                      <select
+                        id="order-customer"
+                        name="customer_id"
+                        value={orderForm.customer_id}
+                        onChange={updateOrderField}
+                        required
+                      >
+                        <option value="">Select a customer</option>
+                        {customers.map((customer) => (
+                          <option key={customer.id} value={customer.id}>
+                            {customerOptionLabel(customer)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="order-garment">Garment Type *</label>
+                      <input
+                        id="order-garment"
+                        name="garment_type"
+                        value={orderForm.garment_type}
+                        onChange={updateOrderField}
+                        placeholder="School Uniform, Dress, Barong"
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="order-quantity">Quantity *</label>
+                      <input
+                        id="order-quantity"
+                        name="quantity"
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={orderForm.quantity}
+                        onChange={updateOrderField}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="order-date">Order Date *</label>
+                      <input
+                        id="order-date"
+                        name="order_date"
+                        type="date"
+                        value={orderForm.order_date}
+                        onChange={updateOrderField}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="order-due-date">Due Date</label>
+                      <input
+                        id="order-due-date"
+                        name="due_date"
+                        type="date"
+                        value={orderForm.due_date}
+                        onChange={updateOrderField}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="order-status">Status *</label>
+                      <select
+                        id="order-status"
+                        name="status"
+                        value={orderForm.status}
+                        onChange={updateOrderField}
+                        required
+                      >
+                        <option value="Pending">Pending</option>
+                        <option value="In Progress">In Progress</option>
+                        <option value="Completed">Completed</option>
+                        <option value="Cancelled">Cancelled</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="order-price">Total Price (PHP) *</label>
+                      <input
+                        id="order-price"
+                        name="total_price"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={orderForm.total_price}
+                        onChange={updateOrderField}
+                        placeholder="1500.00"
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group form-group-full">
+                      <label htmlFor="order-description">Description</label>
+                      <textarea
+                        id="order-description"
+                        name="description"
+                        value={orderForm.description}
+                        onChange={updateOrderField}
+                        placeholder="Describe the garment and requested design"
+                        rows="3"
+                      />
+                    </div>
+
+                    <div className="form-group form-group-full">
+                      <label htmlFor="order-notes">Notes</label>
+                      <textarea
+                        id="order-notes"
+                        name="notes"
+                        value={orderForm.notes}
+                        onChange={updateOrderField}
+                        placeholder="Additional instructions"
+                        rows="3"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-actions">
+                    <button className="btn btn-primary" disabled={saving}>
+                      {saving
+                        ? "Saving..."
+                        : editingOrderId !== null
+                          ? "Update Order"
+                          : "+ Add Order"}
+                    </button>
+
+                    {editingOrderId !== null && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={resetOrderForm}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </form>
               )}
+            </section>
+
+            <section className="panel">
+              <div className="list-heading">
+                <div>
+                  <h3>Order List</h3>
+                  <p>{orders.length} order record(s)</p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={loadData}
+                  disabled={loading}
+                >
+                  Refresh
+                </button>
+              </div>
+
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Order Code</th>
+                      <th>Customer</th>
+                      <th>Garment</th>
+                      <th>Qty</th>
+                      <th>Order Date</th>
+                      <th>Due Date</th>
+                      <th>Status</th>
+                      <th>Total</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orders.length === 0 ? (
+                      <tr>
+                        <td colSpan="9" className="empty-state">
+                          No orders found. Add your first order above.
+                        </td>
+                      </tr>
+                    ) : (
+                      orders.map((order) => (
+                        <tr key={order.id}>
+                          <td>{order.order_code || `ORD-${order.id}`}</td>
+                          <td>
+                            {order.customer_name ||
+                              customerName(order.customer_id)}
+                          </td>
+                          <td>{order.garment_type}</td>
+                          <td>{order.quantity}</td>
+                          <td>
+                            {order.order_date
+                              ? String(order.order_date).slice(0, 10)
+                              : "—"}
+                          </td>
+                          <td>
+                            {order.due_date
+                              ? String(order.due_date).slice(0, 10)
+                              : "—"}
+                          </td>
+                          <td>
+                            <span className="order-status">
+                              {order.status}
+                            </span>
+                          </td>
+                          <td>{formatCurrency(order.total_price)}</td>
+                          <td>
+                            <div className="table-actions">
+                              <button
+                                type="button"
+                                className="btn btn-edit"
+                                onClick={() => editOrder(order)}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-delete"
+                                onClick={() => deleteOrder(order)}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </section>
           </>
         )}
